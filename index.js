@@ -325,6 +325,265 @@ class Client_XMPP {
 
     };
 
+
+    // Handles de creation and joining of group chats
+    async createGC(roomName) {
+        const roomId = roomName + "@conference.alumchat.xyz";
+
+        // If group chat is not found in the server, it will be created
+        await this.xmpp.send(xml("presence", {to: roomId + "/" + this.username}));
+        console.log("Joined group chat succesfully");
+
+        const rl2 = readline.createInterface({
+            input : process.stdin,
+            output : process.stdout
+        });
+
+        rl2.on("line", async(line) => {
+
+            // Handles certain commands with the group chat
+            if(line.trim() === "/exit") {
+                console.log("Leaving group chat...");
+                rl2.close();
+                await this.showMenu();
+            } else if(line.split(" ")[0] === "/invite") {
+                const userToInvite = line.split(" ")[1];
+                const inviteRequest = xml("message", {to: roomId}, xml("x", {xmlns: "http://jabber.org/protocol/muc#user"}, xml("invite", {to: userToInvite + "@alumchat.xyz"}, xml("reason", {}, "Join the group!"))));
+                await this.xmpp.send(inviteRequest);
+                console.log("Invitation sent to: ", userToInvite);
+            } else if(line.split(" ")[0] === "/file") {
+                const filePath = line.split(" ")[1];
+                await this.sendFileGC(roomId, filePath);
+
+            } else {
+                const message = xml("message", {to: roomId, type: "groupchat"}, xml("body", {}, line));
+                await this.xmpp.send(message);
+            }
+        });
+
+        this.xmpp.on('stanza', async (stanza) => {
+            if (stanza.is('message') && stanza.getChild('body')) {
+  
+              if (stanza.attrs.type === "groupchat") {
+                const from = stanza.attrs.from;
+                const body = stanza.getChildText("body");
+  
+                if (from && body) {
+                  console.log(`${from}: ${body}`);
+                }
+              }
+            }
+          });
+
+    }
+
+    // Shows the details of a specific user
+    async showUserDetails(jid) {
+        const username = jid + "@alumchat.xyz";
+
+        this.xmpp.on("stanza", (stanza) => {
+            if(stanza.is("iq") && stanza.attrs.type === "result") {
+                const users = stanza.getChild("query", "jabber:iq:roster").getChildren('item');
+                const user = users.find((user) => user.attrs.jid === username);
+                if(user) {
+                    const jid = user.attrs.jid;
+                    const name = user.attrs.name;
+                    const subscription = user.attrs.subscription;
+                    console.log("Contact:", jid, "Name:", name, "Subscription:", subscription);
+                } else {
+                    console.log("User not found");
+                }
+
+                this.showMenu();
+            }
+        });
+
+        const requestContacts = xml(
+            "iq",
+            {type: "get", id: "roster"},
+            xml("query", {xmlns: "jabber:iq:roster"})
+        );
+
+        this.xmpp.send(requestContacts)
+        .then(() => {
+            console.log("Requesting Contacts...");
+        }).catch((err) => {
+            console.error("Error when requesting contacts: ", err);
+        });
+
+    };
+
+    // Sets presence message and status
+    async setPresenceMessage(presenceState, message) {
+        const presence = xml("presence", {}, xml('show', {}, presenceState), xml('status', {}, message));
+        await this.xmpp.send(presence);
+
+        console.log("Presence status and message set to: ", presenceState, message);
+        this.showMenu();
+    };
+
+
+    // Shows all contacts and some of their info such as subscription type, jid and name
+    async mostrarUsuarios() {
+        const requestContacts = xml(
+            "iq",
+            {type: "get", id: "roster"},
+            xml("query", {xmlns: "jabber:iq:roster"})
+        );
+
+        this.xmpp.send(requestContacts)
+        .then(() => {
+            console.log("Requesting Contacts...");
+        }).catch((err) => {
+            console.error("Error when requesting contacts: ", err);
+        });
+
+        this.xmpp.on("stanza", (stanza) => {
+            if (stanza.is("iq") && stanza.attrs.type === "result") {
+                const contacts = stanza.getChild("query", "jabber:iq:roster").getChildren('item');
+                
+                console.log("Contact list: ");
+                contacts.forEach((contact) => {
+                    console.log("JID", contact.attrs.jid);
+                    console.log("Name", contact.attrs.name);
+                    console.log("Subscription", contact.attrs.subscription);
+                });
+
+
+                // Handles the contact presence and status requests
+                this.xmpp.on("presence", (presence) => {
+                    const from = presence.attrs.from;
+                    const show = presence.getChild("show");
+                    const status = presence.getChild("status");
+
+                    const contact = contacts.find((contact) => contact.attrs.jid === from);
+                    if(contact) {
+                        const jid = contact.attrs.jid;
+                        const name = contact.attrs.name;
+                        const subscription = contact.attrs.subscription;
+                        console.log("Contact:", jid, "Name:", name, "Subscription:", subscription);
+                    } else {
+                        console.log("Contact:", from, "Show:", show, "Status:", status);
+                    }
+
+                })
+            }
+            });
+    };
+
+    // Handles the user registration
+    async registerUser(username, password) {
+        netClient.connect(5222, 'alumchat.xyz', function() {
+            netClient.write("<stream:stream to='alumchat.xyz' xmlns='jabber:client' xmlns:stream='http://etherx.jabber.org/streams' version='1.0'>");
+        });
+
+        //Uses the net module to manually set the valid registering request
+        netClient.on('data', async(data) => {
+            if(data.toString().includes("<stream:features>")) {
+                const register = `
+                <iq type="set" id="reg_1" mechanism='PLAIN'>
+                <query xmlns="jabber:iq:register">
+                  <username>${username}</username>
+                  <password>${password}</password>
+                </query>
+              </iq>
+              `;
+                await netClient.write(register);
+            } else if(data.toString().includes('<iq type="result"')) {
+                console.log("User registered into server");
+                this.registerState = true;
+                await netClient.end();
+            } else if(data.toString().includes('<iq type="error"')) {
+                console.log("XMPP Server error");
+            }
+        });
+
+        netClient.on('close', function() {
+            console.log('Connection closed');
+        });
+    }
+
+
+    // Handles the basic 1 on 1 messaging
+    async sendMessage(destinatario, mensaje) {
+        const message = xml(
+        "message",
+        { type: "chat", to: destinatario + "@alumchat.xyz" },
+        xml("body", {}, mensaje)
+        );
+
+        await this.xmpp.send(message);
+    };
+
+};
+
+async function main() {
+    loginMenu();
+};
+
+// Handles login and registration
+async function loginMenu() {
+    const rl = readline.createInterface({
+        input : process.stdin,
+        output : process.stdout
+    });
+
+    console.log("\n--- Login Menu ---");
+    console.log("1. Login");
+    console.log("2. Register new user");
+    console.log("3. Exit");
+
+    rl.question("Select an option: ", (answer) => {
+        switch(answer) {
+            case '1':
+                rl.question("Enter your username: ", (username) => {
+                    rl.question("Enter your password: ", async(password) => {
+                        const client = new Client_XMPP(username, password);
+                        try {
+                            await client.connect();
+                        } catch (error) {
+                            console.log("Error logging in");
+                            rl.close();
+                            loginMenu();
+                        }
+                        if(client.loginState == false) {
+                            console.log("Error logging in");
+                            rl.close();
+                            loginMenu();
+                        } else if (client.loginState == true) {
+                            console.log("Logged in succesfully");
+                            rl.close();
+                            client.showMenu();
+                        }
+                    });
+                });
+                break;
+            case '2':
+                rl.question("Enter your username: ", (username) => {
+                    rl.question("Enter your password: ", async(password) => {
+                        const client = new Client_XMPP(username, password);
+                        try {
+                            await client.registerUser(client.username, client.password);
+                            loginMenu();
+                        } catch (error) {
+                            console.log("Error registering user");
+                            rl.close();
+                            loginMenu();
+                        }
+                    });
+                });
+                break;
+            case '3':
+                console.log("Exiting...");
+                rl.close();
+                break;
+            default:
+                console.log("Invalid option");
+                rl.close();
+                loginMenu();
+                break;
+        }
+    });
 }
 
 main().catch((error) => {
