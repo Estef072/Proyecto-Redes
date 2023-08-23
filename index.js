@@ -241,7 +241,6 @@ class Client_XMPP {
             await this.xmpp.send(xml("presence", {type: "online"}));
 
 
-            // Handles the different notifications and messages
             this.xmpp.on("stanza", (stanza) => {
                 if(stanza.is('message') && stanza.attrs.type == 'chat') {// Handles incoming chat 1 on 1 messaging
                     const from = stanza.attrs.from;
@@ -325,8 +324,6 @@ class Client_XMPP {
 
     };
 
-
-    // Handles de creation and joining of group chats
     async createGC(roomName) {
         const roomId = roomName + "@conference.alumchat.xyz";
 
