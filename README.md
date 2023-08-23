@@ -29,3 +29,23 @@ This project is dedicated to the development of an XMPP (Extensible Messaging an
   - Ensure agility and effectiveness across all client features.
 
 ---
+## Prerequisites
+- node v16.15.^
+
+## Dependencies
+- @xmpp/client ^0.13.1
+- @xmpp/debug ^0.13.0
+- dotenv 16.3.1
+- net ^1.0.2
+
+## Usage
+First in the command line, inside the backend directory, install the dependencies via
+```
+npm install
+```
+
+And then run the project via
+```
+node index.js
+```
+
